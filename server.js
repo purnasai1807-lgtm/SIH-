@@ -11,6 +11,9 @@ const { z } = require('zod');
 const PORT = Number(process.env.PORT || 3000);
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'data', 'tensorhub.db');
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+const TECHNICAL_TEAM_EMAIL = process.env.TECHNICAL_TEAM_EMAIL;
+const TECHNICAL_TEAM_PASSWORD = process.env.TECHNICAL_TEAM_PASSWORD;
+const APP_ORIGIN = process.env.APP_ORIGIN;
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 async function main() {
 const SQL = await initSqlJs({ locateFile: (file) => path.join(__dirname, 'node_modules', 'sql.js', 'dist', file) });
@@ -80,6 +83,15 @@ const slugify = (value) => `${value.toLowerCase().replace(/[^a-z0-9]+/g, '-').re
 const hashToken = (token) => crypto.createHmac('sha256', SESSION_SECRET).update(token).digest('hex');
 const publicUser = (user) => ({ id: user.id, name: user.name, email: user.email, role: user.role });
 const issue = (res, status, message, details) => res.status(status).json({ error: message, ...(details ? { details } : {}) });
+if (TECHNICAL_TEAM_EMAIL && TECHNICAL_TEAM_PASSWORD) {
+  const email = emailSchema.parse(TECHNICAL_TEAM_EMAIL);
+  passwordSchema.parse(TECHNICAL_TEAM_PASSWORD);
+  const existing = sql('SELECT id FROM users WHERE email=?').get(email);
+  if (existing) sql('UPDATE users SET role=? WHERE id=?').run('TECHNICAL_TEAM', existing.id);
+  else sql('INSERT INTO users (name,email,password_hash,role) VALUES (?,?,?,?)').run(
+    'TensorHub Technical Team', email, bcrypt.hashSync(TECHNICAL_TEAM_PASSWORD, 12), 'TECHNICAL_TEAM'
+  );
+}
 
 function setSession(res, userId) {
   const token = crypto.randomBytes(32).toString('base64url');
@@ -113,6 +125,17 @@ function parseBody(schema, req, res) {
   if (!parsed.success) { issue(res, 400, 'Invalid request', parsed.error.flatten().fieldErrors); return null; }
   return parsed.data;
 }
+function requireSameOrigin(req, res, next) {
+  if (!['POST', 'PATCH', 'PUT', 'DELETE'].includes(req.method)) return next();
+  const source = req.get('origin') || req.get('referer');
+  if (!source) return issue(res, 403, 'Origin header required');
+  try {
+    const expected = APP_ORIGIN ? new URL(APP_ORIGIN).origin : `${req.protocol}://${req.get('host')}`;
+    if (new URL(source).origin !== expected) return issue(res, 403, 'Cross-origin request blocked');
+  } catch { return issue(res, 403, 'Invalid request origin'); }
+  next();
+}
+app.use('/api', requireSameOrigin);
 
 app.get('/api/health', (_req, res) => res.json({ ok: true, service: 'tensorhub' }));
 app.post('/api/auth/register', rateLimit({ windowMs: 15 * 60 * 1000, limit: 10 }), (req, res) => {
