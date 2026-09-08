@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="TensorHub events, technical community and coding challenges">
+  <title>TensorHub</title><link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header><a class="brand" href="/">TensorHub</a><nav><a href="#events">Events</a><a href="#challenges">Challenges</a><button id="auth-button">Sign in</button></nav></header>
+  <main>
+    <section class="hero"><p class="eyebrow">Build. Learn. Connect.</p><h1>The technical community for people shaping what’s next.</h1><p>Discover upcoming events, register with trusted organizers, and sharpen your skills with practical challenges.</p></section>
+    <section id="events"><div class="section-heading"><div><p class="eyebrow">Community calendar</p><h2>Upcoming events</h2></div><input id="event-search" aria-label="Search events" placeholder="Search events"></div><div id="event-list" class="grid"></div><div id="event-pages" class="pagination"></div></section>
+    <section id="challenges"><p class="eyebrow">Practice safely</p><h2>Coding challenges</h2><p class="muted">Submissions are queued for an isolated execution worker. This web application never runs untrusted code.</p><div id="challenge-list" class="grid"></div></section>
+  </main>
+  <dialog id="auth-dialog"><form method="dialog" id="auth-form"><button class="close" value="cancel" aria-label="Close">×</button><h2 id="auth-title">Sign in</h2><div id="auth-name-wrap" class="hidden"><label>Name<input id="auth-name" name="name" autocomplete="name"></label></div><label>Email<input id="auth-email" name="email" type="email" required autocomplete="email"></label><label>Password<input id="auth-password" name="password" type="password" required minlength="12" autocomplete="current-password"></label><button class="primary" value="submit">Continue</button><p id="auth-error" class="error"></p><button type="button" class="link-button" id="auth-toggle">Create an account</button></form></dialog>
+  <template id="event-card"><article class="card"><p class="date"></p><h3></h3><p class="description"></p><p class="meta"></p><a class="primary register" target="_blank" rel="noopener noreferrer">Register externally ↗</a></article></template>
+  <script src="/app.js"></script>
+</body>
+</html>
