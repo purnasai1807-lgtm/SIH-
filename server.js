@@ -58,6 +58,29 @@ db.run(`
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
   CREATE INDEX IF NOT EXISTS submissions_user_idx ON submissions(user_id, created_at);
+  CREATE TABLE IF NOT EXISTS audit_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    action TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT, metadata TEXT NOT NULL DEFAULT '{}',
+    ip TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS audit_logs_created_idx ON audit_logs(created_at);
+  CREATE TABLE IF NOT EXISTS reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, reporter_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, reason TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'OPEN',
+    resolution TEXT, resolved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, resolved_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS reports_status_idx ON reports(status, created_at);
+  CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type TEXT NOT NULL, title TEXT NOT NULL, message TEXT NOT NULL, read_at TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications(user_id, read_at, created_at);
+  CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    token_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at TEXT NOT NULL, used_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 const app = express();
@@ -83,6 +106,12 @@ const slugify = (value) => `${value.toLowerCase().replace(/[^a-z0-9]+/g, '-').re
 const hashToken = (token) => crypto.createHmac('sha256', SESSION_SECRET).update(token).digest('hex');
 const publicUser = (user) => ({ id: user.id, name: user.name, email: user.email, role: user.role });
 const issue = (res, status, message, details) => res.status(status).json({ error: message, ...(details ? { details } : {}) });
+const audit = (req, action, entityType, entityId, metadata = {}) => sql(
+  'INSERT INTO audit_logs (actor_id,action,entity_type,entity_id,metadata,ip) VALUES (?,?,?,?,?,?)'
+).run(req.user?.id || null, action, entityType, entityId == null ? null : String(entityId), JSON.stringify(metadata), req.ip || null);
+const notify = (userId, type, title, message) => sql(
+  'INSERT INTO notifications (user_id,type,title,message) VALUES (?,?,?,?)'
+).run(userId, type, title, message);
 if (TECHNICAL_TEAM_EMAIL && TECHNICAL_TEAM_PASSWORD) {
   const email = emailSchema.parse(TECHNICAL_TEAM_EMAIL);
   passwordSchema.parse(TECHNICAL_TEAM_PASSWORD);
@@ -120,6 +149,10 @@ function requireTechnicalTeam(req, res, next) {
   if (!['TECHNICAL_TEAM', 'ADMIN'].includes(req.user.role)) return issue(res, 403, 'Technical Team role required');
   next();
 }
+function requireAdmin(req, res, next) {
+  if (req.user.role !== 'ADMIN') return issue(res, 403, 'Administrator role required');
+  next();
+}
 function parseBody(schema, req, res) {
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) { issue(res, 400, 'Invalid request', parsed.error.flatten().fieldErrors); return null; }
@@ -145,6 +178,7 @@ app.post('/api/auth/register', rateLimit({ windowMs: 15 * 60 * 1000, limit: 10 }
   try {
     const result = sql('INSERT INTO users (name,email,password_hash) VALUES (?,?,?)').run(name, email, bcrypt.hashSync(password, 12));
     const user = sql('SELECT * FROM users WHERE id=?').get(result.lastInsertRowid);
+    audit(req, 'REGISTER', 'USER', user.id);
     setSession(res, user.id);
     res.status(201).json({ user: publicUser(user) });
   } catch (error) {
@@ -158,10 +192,35 @@ app.post('/api/auth/login', rateLimit({ windowMs: 15 * 60 * 1000, limit: 10 }), 
   const user = sql('SELECT * FROM users WHERE email=?').get(parsed.data.email);
   if (!user || !bcrypt.compareSync(parsed.data.password, user.password_hash)) return issue(res, 401, 'Invalid email or password');
   setSession(res, user.id);
+  audit(req, 'LOGIN', 'USER', user.id);
   res.json({ user: publicUser(user) });
 });
 app.post('/api/auth/logout', (req, res) => { clearSession(req, res); res.status(204).end(); });
 app.get('/api/auth/me', (req, res) => { const user = loadUser(req); res.json({ user: user ? publicUser(user) : null }); });
+app.post('/api/auth/password-reset/request', rateLimit({ windowMs: 15 * 60 * 1000, limit: 5 }), (req, res) => {
+  const parsed = z.object({ email: emailSchema }).safeParse(req.body);
+  if (!parsed.success) return issue(res, 400, 'Valid email is required');
+  const user = sql('SELECT id FROM users WHERE email=?').get(parsed.data.email);
+  if (user) {
+    const token = crypto.randomBytes(32).toString('base64url');
+    sql("DELETE FROM password_reset_tokens WHERE user_id=?").run(user.id);
+    sql("INSERT INTO password_reset_tokens (token_hash,user_id,expires_at) VALUES (?,?,datetime('now','+30 minutes'))").run(hashToken(token), user.id);
+    audit(req, 'PASSWORD_RESET_REQUESTED', 'USER', user.id);
+    if (process.env.NODE_ENV !== 'production') return res.json({ ok: true, developmentToken: token });
+  }
+  res.json({ ok: true, message: 'If that account exists, reset instructions will be sent.' });
+});
+app.post('/api/auth/password-reset/complete', (req, res) => {
+  const parsed = z.object({ token: z.string().min(20).max(200), password: passwordSchema }).safeParse(req.body);
+  if (!parsed.success) return issue(res, 400, 'Valid reset token and password of at least 12 characters are required');
+  const token = sql("SELECT user_id FROM password_reset_tokens WHERE token_hash=? AND used_at IS NULL AND expires_at > datetime('now')").get(hashToken(parsed.data.token));
+  if (!token) return issue(res, 400, 'Reset token is invalid or expired');
+  sql('UPDATE users SET password_hash=? WHERE id=?').run(bcrypt.hashSync(parsed.data.password, 12), token.user_id);
+  sql("UPDATE password_reset_tokens SET used_at=datetime('now') WHERE token_hash=?").run(hashToken(parsed.data.token));
+  sql('DELETE FROM sessions WHERE user_id=?').run(token.user_id);
+  audit(req, 'PASSWORD_RESET_COMPLETED', 'USER', token.user_id);
+  res.json({ ok: true });
+});
 
 app.get('/api/events', (req, res) => {
   const page = Math.max(1, Math.min(10000, Number.parseInt(req.query.page, 10) || 1));
@@ -187,6 +246,7 @@ app.post('/api/manage/events', (req, res) => {
   const result = sql(`INSERT INTO events (title,slug,description,starts_at,ends_at,location,registration_url,published,created_by)
     VALUES (@title,@slug,@description,@startsAt,@endsAt,@location,@registrationUrl,@published,@createdBy)`).run({ ...data, slug: slugify(data.title), createdBy: req.user.id });
   res.status(201).json({ event: sql('SELECT * FROM events WHERE id=?').get(result.lastInsertRowid) });
+  audit(req, 'CREATE', 'EVENT', result.lastInsertRowid, { title: data.title });
 });
 app.patch('/api/manage/events/:id', (req, res) => {
   const data = parseBody(eventSchema.partial(), req, res); if (!data) return;
@@ -203,6 +263,7 @@ app.patch('/api/manage/events/:id', (req, res) => {
 app.delete('/api/manage/events/:id', (req, res) => {
   const result = sql('DELETE FROM events WHERE id=?').run(req.params.id);
   if (!result.changes) return issue(res, 404, 'Event not found');
+  audit(req, 'DELETE', 'EVENT', req.params.id);
   res.status(204).end();
 });
 app.get('/api/challenges', (_req, res) => res.json({ challenges: sql('SELECT id,title,description,language,starter_code starterCode FROM challenges ORDER BY created_at DESC LIMIT 100').all() }));
@@ -223,8 +284,45 @@ app.post('/api/manage/challenges', (req, res) => {
   const parsed = z.object({ title: z.string().trim().min(3).max(160), description: z.string().trim().min(10).max(10000), language: z.string().trim().min(1).max(40), starterCode: z.string().max(50000).default('') }).safeParse(req.body);
   if (!parsed.success) return issue(res, 400, 'Invalid challenge');
   const result = sql('INSERT INTO challenges (title,description,language,starter_code,created_by) VALUES (?,?,?,?,?)').run(parsed.data.title, parsed.data.description, parsed.data.language, parsed.data.starterCode, req.user.id);
+  audit(req, 'CREATE', 'CHALLENGE', result.lastInsertRowid, { title: parsed.data.title });
   res.status(201).json({ id: result.lastInsertRowid });
 });
+app.post('/api/reports', requireAuth, (req, res) => {
+  const parsed = z.object({ entityType: z.enum(['EVENT', 'CHALLENGE']), entityId: z.string().max(50), reason: z.string().trim().min(10).max(1000) }).safeParse(req.body);
+  if (!parsed.success) return issue(res, 400, 'A valid content type, id, and reason are required');
+  const result = sql('INSERT INTO reports (reporter_id,entity_type,entity_id,reason) VALUES (?,?,?,?)').run(req.user.id, parsed.data.entityType, parsed.data.entityId, parsed.data.reason);
+  audit(req, 'REPORT', parsed.data.entityType, parsed.data.entityId);
+  res.status(201).json({ reportId: result.lastInsertRowid, status: 'OPEN' });
+});
+app.get('/api/notifications', requireAuth, (req, res) => res.json({ notifications: sql('SELECT id,type,title,message,read_at readAt,created_at createdAt FROM notifications WHERE user_id=? ORDER BY created_at DESC LIMIT 50').all(req.user.id) }));
+app.post('/api/notifications/:id/read', requireAuth, (req, res) => { const result = sql("UPDATE notifications SET read_at=datetime('now') WHERE id=? AND user_id=?").run(req.params.id, req.user.id); if (!result.changes) return issue(res, 404, 'Notification not found'); res.status(204).end(); });
+app.use('/api/admin', requireAuth, requireAdmin);
+app.get('/api/admin/users', (req, res) => {
+  const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+  const limit = Math.min(50, Math.max(1, Number.parseInt(req.query.limit, 10) || 25));
+  const users = sql('SELECT id,name,email,role,created_at createdAt FROM users ORDER BY created_at DESC LIMIT @limit OFFSET @offset').all({ limit, offset: (page - 1) * limit });
+  res.json({ users, page, limit });
+});
+app.patch('/api/admin/users/:id/role', (req, res) => {
+  const parsed = z.object({ role: z.enum(['MEMBER', 'TECHNICAL_TEAM', 'ADMIN']) }).safeParse(req.body);
+  if (!parsed.success) return issue(res, 400, 'Invalid role');
+  if (Number(req.params.id) === req.user.id && parsed.data.role !== 'ADMIN') return issue(res, 400, 'You cannot remove your own administrator role');
+  const result = sql('UPDATE users SET role=? WHERE id=?').run(parsed.data.role, req.params.id);
+  if (!result.changes) return issue(res, 404, 'User not found');
+  audit(req, 'ROLE_CHANGED', 'USER', req.params.id, { role: parsed.data.role });
+  notify(Number(req.params.id), 'ROLE_CHANGED', 'Role updated', `Your TensorHub role is now ${parsed.data.role}.`);
+  res.json({ ok: true });
+});
+app.get('/api/admin/reports', (req, res) => res.json({ reports: sql('SELECT id,reporter_id reporterId,entity_type entityType,entity_id entityId,reason,status,resolution,created_at createdAt FROM reports ORDER BY created_at DESC LIMIT 100').all() }));
+app.patch('/api/admin/reports/:id', (req, res) => {
+  const parsed = z.object({ status: z.enum(['OPEN', 'RESOLVED', 'DISMISSED']), resolution: z.string().trim().max(1000).optional().default('') }).safeParse(req.body);
+  if (!parsed.success) return issue(res, 400, 'Invalid moderation update');
+  const result = sql("UPDATE reports SET status=?,resolution=?,resolved_by=?,resolved_at=datetime('now') WHERE id=?").run(parsed.data.status, parsed.data.resolution, req.user.id, req.params.id);
+  if (!result.changes) return issue(res, 404, 'Report not found');
+  audit(req, 'MODERATION_UPDATE', 'REPORT', req.params.id, parsed.data);
+  res.json({ ok: true });
+});
+app.get('/api/admin/audit-logs', (req, res) => res.json({ logs: sql('SELECT id,actor_id actorId,action,entity_type entityType,entity_id entityId,metadata,ip,created_at createdAt FROM audit_logs ORDER BY created_at DESC LIMIT 200').all() }));
 
 app.use((error, _req, res, _next) => {
   console.error(error);

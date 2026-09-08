@@ -32,6 +32,12 @@ SQLite with WAL is suitable for a single instance and modest write volume. For a
 
 `POST /api/challenges/:id/submissions` validates and stores source with `QUEUED` status. A separate worker must claim jobs, run them in disposable network-disabled containers or a sandbox with strict CPU/memory/time limits, write only `PASSED`/`FAILED`/`ERROR` status, and never share the web process or its filesystem. No endpoint in this repository executes submitted code.
 
+## Operations and account modules
+
+The server includes administrator-protected user/role management, moderation reports for events and challenges, append-only audit records for authentication and management actions, in-app notification records, and password-reset token contracts. Password reset requests intentionally return a development-only token when `NODE_ENV` is not `production`; production must connect this endpoint to a transactional email provider and must never expose tokens in HTTP responses. Email verification and MFA require an external identity/email service or an additional approved provider configuration and are not falsely marked as complete.
+
+All mutating API routes require a same-origin `Origin`/`Referer` check, authenticated management routes enforce roles server-side, password-reset tokens are hashed and expire after 30 minutes, and changing a password invalidates existing sessions. The supplied Technical Team password is not present in this repository; rotate it before use.
+
 ## Checks
 
 ```sh
