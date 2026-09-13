@@ -1,5 +1,7 @@
 import pyotp
+import smtplib
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from datetime import datetime, timezone
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.config import settings
@@ -14,11 +16,13 @@ from app.models.token import RevokedToken
 from app.models.consent import ConsentRecord
 from app.schemas.auth import (
     UserRegister, Token, UserOut, MFASetupResponse, MFAVerifyRequest, UserLogin,
+    RegistrationResponse, EmailVerificationRequest, ResendVerificationRequest,
 )
 from app.services.audit import record_audit
 from app.services.data_retention import anonymize_user
+from app.services.email_verification import create_verification_token, send_verification_email, verify_email_token
 router = APIRouter(prefix="/auth", tags=["auth"])
-@router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
+@router.post("/register", response_model=RegistrationResponse, status_code=status.HTTP_201_CREATED)
 def register(payload: UserRegister, request: Request, db: Session = Depends(get_db)):
     problems = validate_password_strength(payload.password)
     if problems:
@@ -35,6 +39,7 @@ def register(payload: UserRegister, request: Request, db: Session = Depends(get_
         full_name=payload.full_name,
         phone=payload.phone,
         role=payload.role,
+        email_verified=False,
     )
     db.add(user)
     db.commit()
@@ -47,7 +52,18 @@ def register(payload: UserRegister, request: Request, db: Session = Depends(get_
         db, action="user.register", resource_type="user", resource_id=user.id, actor=user,
         detail={"role": user.role.value}, ip_address=request.client.host if request.client else None,
     )
-    return user
+    token = create_verification_token(db, user)
+    try:
+        verification_link = send_verification_email(user, token)
+    except (OSError, smtplib.SMTPException) as exc:
+        db.delete(user)
+        db.commit()
+        raise HTTPException(status_code=503, detail="Unable to send verification email. Please try again later.") from exc
+    return RegistrationResponse(
+        user=user,
+        verification_required=True,
+        verification_url=verification_link,
+    )
 @router.post("/login")
 def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     """
@@ -74,6 +90,8 @@ def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db
             ip_address=client_ip, outcome="failure", detail={"reason": "account_inactive"},
         )
         raise HTTPException(status_code=403, detail="Account is not active")
+    if not user.email_verified:
+        raise HTTPException(status_code=403, detail="Please verify your email address before signing in.")
     if user.mfa_enabled:
         # Password verified, but not done yet — the client must present
         # the TOTP code to POST /auth/login/mfa to actually receive a token.
@@ -174,6 +192,26 @@ def logout(
 @router.get("/me", response_model=UserOut)
 def me(current_user: User = Depends(get_current_user)):
     return current_user
+
+
+@router.post("/verify-email", response_model=UserOut)
+def verify_email(payload: EmailVerificationRequest, db: Session = Depends(get_db)):
+    try:
+        return verify_email_token(db, payload.token)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/resend-verification", status_code=status.HTTP_202_ACCEPTED)
+def resend_verification(payload: ResendVerificationRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == payload.email.lower()).first()
+    if user and not user.email_verified and user.is_active:
+        token = create_verification_token(db, user)
+        try:
+            send_verification_email(user, token)
+        except (OSError, smtplib.SMTPException) as exc:
+            raise HTTPException(status_code=503, detail="Unable to send verification email.") from exc
+    return {"status": "accepted"}
 @router.post("/erase-my-data", status_code=status.HTTP_200_OK)
 def erase_my_data(
     request: Request, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)

@@ -16,6 +16,12 @@ interface TokenResponse {
   role: UserRole;
 }
 
+interface RegistrationResponse {
+  user: ApiUser;
+  verification_required: boolean;
+  verification_url?: string | null;
+}
+
 function mapUser(user: ApiUser): User {
   return {
     id: String(user.id),
@@ -75,9 +81,12 @@ class AuthService {
 
   private async register(payload: { full_name: string; email: string; phone: string; password: string; role: UserRole }): Promise<{ success: boolean; user?: User; error?: string }> {
     try {
-      const user = mapUser(await apiRequest<ApiUser>('/auth/register', { method: 'POST', body: JSON.stringify(payload) }));
-      const login = await this.login(payload.email, payload.password, payload.role);
-      return login.success ? login : { success: false, error: login.error };
+      const registration = await apiRequest<RegistrationResponse>('/auth/register', { method: 'POST', body: JSON.stringify(payload) });
+      if (registration.verification_required) {
+        const suffix = registration.verification_url ? ` Development verification link: ${registration.verification_url}` : '';
+        return { success: false, error: `Registration complete. Check ${payload.email} to verify your email before signing in.${suffix}` };
+      }
+      return { success: false, error: 'Registration complete. Verify your email before signing in.' };
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : 'Unable to register.' };
     }

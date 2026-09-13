@@ -23,6 +23,7 @@ import { LenderSignUpPage } from './pages/auth/LenderSignUpPage';
 import { BorrowerSignInPage } from './pages/auth/BorrowerSignInPage';
 import { BorrowerSignUpPage } from './pages/auth/BorrowerSignUpPage';
 import { AdminSignInPage } from './pages/auth/AdminSignInPage';
+import { VerifyEmailPage } from './pages/auth/VerifyEmailPage';
 
 // Lender Pages
 import { LenderDashboard } from './pages/lender/Dashboard';
@@ -66,6 +67,7 @@ export default function App() {
             <Route path="/borrower/signin" element={<BorrowerSignInPage />} />
             <Route path="/borrower/signup" element={<BorrowerSignUpPage />} />
             <Route path="/admin/signin" element={<AdminSignInPage />} />
+            <Route path="/verify-email" element={<VerifyEmailPage />} />
           </Route>
 
           {/* Protected Lender Routes */}

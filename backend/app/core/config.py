@@ -15,6 +15,14 @@ class Settings(BaseSettings):
     LOGIN_RATE_LIMIT_ATTEMPTS: int = 5
     LOGIN_RATE_LIMIT_WINDOW_SECONDS: int = 300
     EXPOSE_API_DOCS: bool = True
+    EMAIL_VERIFICATION_EXPIRE_MINUTES: int = 30
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM_EMAIL: str = ""
+    SMTP_USE_TLS: bool = True
+    FRONTEND_URL: str = "http://localhost:3000"
     FIELD_ENCRYPTION_KEY: str = ""
     MFA_ISSUER_NAME: str = "CodeVest"
     KYC_PROVIDER: str = "mock"
@@ -37,6 +45,10 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "Refusing to start with ENVIRONMENT=production and no FIELD_ENCRYPTION_KEY "
                     "configured — PII columns (phone, registration numbers, MFA secrets) require it."
+                )
+            if not all((self.SMTP_HOST, self.SMTP_USERNAME, self.SMTP_PASSWORD, self.SMTP_FROM_EMAIL)):
+                raise ValueError(
+                    "Refusing to start with ENVIRONMENT=production and incomplete SMTP settings."
                 )
             self.EXPOSE_API_DOCS = False
         return self

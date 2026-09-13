@@ -32,5 +32,20 @@ class UserOut(BaseModel):
     role: UserRole
     status: str
     mfa_enabled: bool
+    email_verified: bool
     class Config:
         from_attributes = True
+
+
+class RegistrationResponse(BaseModel):
+    user: UserOut
+    verification_required: bool = True
+    verification_url: str | None = None
+
+
+class EmailVerificationRequest(BaseModel):
+    token: str = Field(min_length=20)
+
+
+class ResendVerificationRequest(BaseModel):
+    email: EmailStr
