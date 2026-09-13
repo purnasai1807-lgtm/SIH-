@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { ShieldCheck, CheckCircle2, AlertTriangle, TrendingUp, Sparkles, Building2 } from 'lucide-react';
 import { dataService } from '../../services/dataService';
 import { ScoreGauge } from '../../components/common/ScoreGauge';
@@ -6,29 +6,14 @@ import { formatINR } from '../../utils/formatters';
 import { ScorePillarBreakdown } from '../../types';
 
 export const BusinessHealthPage: React.FC = () => {
-  const trustScore = dataService.getBusinessTrustScoreSync();
+  const [trustScore, setTrustScore] = useState<Awaited<ReturnType<typeof dataService.fetchBusinessHealth>> | null>(null);
+  useEffect(() => {
+    dataService.fetchBusinessHealth().then(setTrustScore).catch(() => setTrustScore(null));
+  }, []);
+  if (!trustScore) return <div className="p-8 text-sm text-slate-500">Loading live business health data...</div>;
   const pillars: ScorePillarBreakdown[] = Object.values(trustScore.pillars);
 
-  const actionableRecommendations = [
-    {
-      title: 'Reduce Top Customer Concentration',
-      impact: '+3 points',
-      current: 'Primary customer represents 28% of quarterly billing',
-      advice: 'Onboarding 1 new buyer generating >10% of revenue will diversify credit exposure.'
-    },
-    {
-      title: 'Shorten Receivable Collection Cycle',
-      impact: '+2 points',
-      current: 'Average collection cycle is 42 days',
-      advice: 'Targeting 35 days on corporate invoices will boost cash flow velocity pillar.'
-    },
-    {
-      title: 'Provide ISO 9001:2015 Recertification',
-      impact: '+1 point',
-      current: 'Expires in 4 months',
-      advice: 'Uploading renewal audit documents will ensure maximum transparency points.'
-    }
-  ];
+  const actionableRecommendations = [];
 
   return (
     <div className="space-y-8 pb-16">
@@ -48,14 +33,14 @@ export const BusinessHealthPage: React.FC = () => {
       <div className="bg-white rounded-2xl border border-slate-200 p-6 sm:p-8 flex flex-col md:flex-row items-center justify-between gap-6 shadow-xs">
         <div className="space-y-2 max-w-lg">
           <div className="text-xs font-bold uppercase text-emerald-700">Tier-1 Institutional Rating</div>
-          <h2 className="text-2xl font-bold text-slate-950">Overall Health Score: 86 / 100</h2>
+          <h2 className="text-2xl font-bold text-slate-950">Overall Health Score: {trustScore.overallScore} / 100</h2>
           <p className="text-xs text-slate-600 leading-relaxed">
             Your score places your business in the top 8% of verified Indian manufacturing MSMEs on CodeVest, unlocking prime financing interest rates (14% – 16% p.a.).
           </p>
         </div>
 
         <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200">
-          <ScoreGauge score={86} size="lg" label="Trust Score" trendText="+4 pts (Improving)" />
+          <ScoreGauge score={trustScore.overallScore} size="lg" label="Trust Score" trendText={`${trustScore.trendPoints >= 0 ? '+' : ''}${trustScore.trendPoints} pts (${trustScore.trend})`} />
         </div>
       </div>
 

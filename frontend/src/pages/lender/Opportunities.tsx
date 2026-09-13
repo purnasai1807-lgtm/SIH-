@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Search,
@@ -32,6 +32,9 @@ export const OpportunitiesPage: React.FC = () => {
     return Array.isArray(list) ? list : [];
   });
   const [selectedOpportunity, setSelectedOpportunity] = useState<FinancingOpportunity | null>(null);
+  useEffect(() => {
+    dataService.fetchOpportunities().then(setOpportunities).catch(() => setOpportunities([]));
+  }, []);
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -50,11 +53,11 @@ export const OpportunitiesPage: React.FC = () => {
           opp.industry.toLowerCase().includes(searchQuery.toLowerCase());
         const matchesCategory =
           selectedCategory === 'All' || opp.industry === selectedCategory || opp.category === selectedCategory;
-        const matchesScore = opp.trustScore.overallScore >= minScore;
+        const matchesScore = opp.trustScore >= minScore;
         return matchesSearch && matchesCategory && matchesScore;
       })
       .sort((a, b) => {
-        if (sortBy === 'score') return b.trustScore.overallScore - a.trustScore.overallScore;
+        if (sortBy === 'score') return b.trustScore - a.trustScore;
         if (sortBy === 'amount') return b.requestedAmount - a.requestedAmount;
         // Parse return rate like "15.5% p.a."
         const returnA = parseFloat(a.expectedReturnRate) || 0;
@@ -228,7 +231,7 @@ export const OpportunitiesPage: React.FC = () => {
                       </p>
                     </div>
 
-                    <ScoreGauge score={opp.trustScore.overallScore} size="sm" label="Trust Score" />
+                    <ScoreGauge score={opp.trustScore} size="sm" label="Trust Score" />
                   </div>
 
                   {/* Purpose */}

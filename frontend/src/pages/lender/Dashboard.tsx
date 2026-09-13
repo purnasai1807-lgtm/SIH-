@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   TrendingUp,
@@ -42,8 +42,17 @@ export const LenderDashboard: React.FC = () => {
   const [activePositions, setActivePositions] = useState(
     dataService.getActivePositions(user?.id)
   );
-  const [alerts] = useState(dataService.getMonitoringAlerts().filter(a => !a.isRead));
   const [selectedOpportunity, setSelectedOpportunity] = useState<FinancingOpportunity | null>(null);
+  const [alerts, setAlerts] = useState(dataService.getMonitoringAlerts().filter(a => !a.isRead));
+  useEffect(() => {
+    Promise.all([dataService.fetchOpportunities(), dataService.fetchPortfolio(), dataService.fetchAlerts('lender')])
+      .then(([loadedOpportunities, loadedPositions, loadedAlerts]) => {
+        setOpportunities(loadedOpportunities);
+        setActivePositions(loadedPositions);
+        setAlerts(loadedAlerts.filter((alert) => !alert.isRead));
+      })
+      .catch(() => undefined);
+  }, []);
 
   // Profile completion calculation
   const completion = calculateLenderProfileCompletion(user?.lenderProfile);

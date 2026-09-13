@@ -1,16 +1,12 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Activity, AlertTriangle, ShieldCheck, CheckCircle2, Clock, RefreshCw } from 'lucide-react';
 import { dataService } from '../../services/dataService';
 
 export const TelemetryOpsPage: React.FC = () => {
   const [alerts, setAlerts] = useState(dataService.getMonitoringAlerts());
-
-  const eventFeed = [
-    { time: '10:42 AM', entity: 'ABC Manufacturing Pvt Ltd', type: 'AA_BALANCE_SYNC', detail: 'HDFC Current Account balance ₹14.8L synced via Setu AA gateway. Trend: Normal.' },
-    { time: '09:15 AM', entity: 'Delta Solar Power Systems', type: 'GST_FILING_OK', detail: 'GSTR-3B for August reconciled with electronic ledger. Tax paid: ₹3.42L.' },
-    { time: 'Yesterday', entity: 'Zenith MedTech Solutions', type: 'CONCENTRATION_ALERT', detail: 'Primary buyer Apollo Hospital deferred billing cycle by 14 days. Early warning alert issued.' },
-    { time: 'Yesterday', entity: 'Kaveri Agro Logistics', type: 'MANDATE_SUCCESS', detail: 'Auto-debit test ping via NPCI eNACH successful.' }
-  ];
+  useEffect(() => {
+    dataService.fetchAlerts('admin').then(setAlerts).catch(() => setAlerts([]));
+  }, []);
 
   return (
     <div className="space-y-6 pb-16">
@@ -34,16 +30,7 @@ export const TelemetryOpsPage: React.FC = () => {
           </div>
 
           <div className="space-y-3 pt-2">
-            {eventFeed.map((e, idx) => (
-              <div key={idx} className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1 text-xs">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-slate-900">{e.entity}</span>
-                  <span className="font-mono text-[10px] text-slate-400">{e.time}</span>
-                </div>
-                <p className="text-slate-600 text-[11px] leading-relaxed">{e.detail}</p>
-                <div className="text-[10px] font-mono text-blue-700 font-semibold">{e.type}</div>
-              </div>
-            ))}
+            {alerts.length === 0 && <p className="text-xs text-slate-500">No live monitoring events have been recorded.</p>}
           </div>
         </div>
 

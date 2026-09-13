@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Building2,
@@ -37,9 +37,13 @@ export const BorrowerDashboard: React.FC = () => {
   const completion = calculateBorrowerProfileCompletion(profile);
   const isDiscoverable = completion.visibilityStatus === 'DISCOVERABLE';
   const isPending = !isDiscoverable;
-  const trustScore = dataService.getBusinessTrustScoreSync();
+  const [trustScore, setTrustScore] = useState<Awaited<ReturnType<typeof dataService.fetchBusinessHealth>> | null>(null);
   const activePositions = dataService.getActivePositions();
   const myFacility = !isDiscoverable ? null : activePositions[0];
+  const pillars = (trustScore ? Object.values(trustScore.pillars) : []) as ScorePillarBreakdown[];
+  useEffect(() => {
+    dataService.fetchBusinessHealth().then(setTrustScore).catch(() => setTrustScore(null));
+  }, []);
 
   return (
     <div className="space-y-8 pb-16">
@@ -223,7 +227,7 @@ export const BorrowerDashboard: React.FC = () => {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <MetricCard
           label="Trust Health Score"
-          value={!isDiscoverable ? 'Assessment Pending' : `${trustScore.overallScore} / 100`}
+          value={!isDiscoverable || !trustScore ? 'Assessment Pending' : `${trustScore.overallScore} / 100`}
           subtext={!isDiscoverable ? 'Awaiting regulatory audit' : 'Grade: Tier-1 Verified'}
           trend={!isDiscoverable ? 'Baseline queue' : '+4 pts this quarter'}
           icon={ShieldCheck}
@@ -266,7 +270,7 @@ export const BorrowerDashboard: React.FC = () => {
               </div>
 
               <ScoreGauge
-                score={isPending ? 72 : trustScore.overallScore}
+                score={trustScore?.overallScore || 0}
                 size="md"
                 label="Trust Score"
                 trendText={isPending ? 'Initial Model' : 'Improving'}
@@ -275,7 +279,7 @@ export const BorrowerDashboard: React.FC = () => {
 
             {/* 6 Pillars */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-              {(Object.values(trustScore.pillars) as ScorePillarBreakdown[]).map((pillar, idx) => (
+              {pillars.map((pillar, idx) => (
                 <div key={idx} className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 space-y-2">
                   <div className="flex items-center justify-between text-xs">
                     <span className="font-bold text-slate-800">{pillar.name}</span>

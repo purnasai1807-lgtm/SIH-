@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Activity,
@@ -25,6 +25,14 @@ export const PortfolioPage: React.FC = () => {
   const [positions, setPositions] = useState<ActivePortfolioPosition[]>(dataService.getActivePositions());
   const [alerts, setAlerts] = useState<PlatformAlert[]>(dataService.getMonitoringAlerts());
   const [activeTab, setActiveTab] = useState<'positions' | 'telemetry' | 'ledger'>('positions');
+  useEffect(() => {
+    Promise.all([dataService.fetchPortfolio(), dataService.fetchAlerts('lender')])
+      .then(([loadedPositions, loadedAlerts]) => {
+        setPositions(loadedPositions);
+        setAlerts(loadedAlerts);
+      })
+      .catch(() => undefined);
+  }, []);
 
   const totalInvested = positions.reduce((sum, p) => sum + p.financedAmount, 0);
   const totalRepaid = positions.reduce((sum, p) => sum + p.totalRepaid, 0);
@@ -53,8 +61,12 @@ export const PortfolioPage: React.FC = () => {
         <div className="flex items-center gap-2">
           <button
             onClick={() => {
-              setPositions(dataService.getActivePositions());
-              setAlerts(dataService.getMonitoringAlerts());
+              Promise.all([dataService.fetchPortfolio(), dataService.fetchAlerts('lender')])
+                .then(([loadedPositions, loadedAlerts]) => {
+                  setPositions(loadedPositions);
+                  setAlerts(loadedAlerts);
+                })
+                .catch(() => undefined);
             }}
             className="px-3 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-lg shadow-xs flex items-center gap-1.5 transition"
           >
