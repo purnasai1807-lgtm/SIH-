@@ -16,12 +16,6 @@ interface TokenResponse {
   role: UserRole;
 }
 
-interface RegistrationResponse {
-  user: ApiUser;
-  verification_required: boolean;
-  verification_url?: string | null;
-}
-
 function mapUser(user: ApiUser): User {
   return {
     id: String(user.id),
@@ -71,22 +65,18 @@ class AuthService {
     }
   }
 
-  async registerLender(payload: { fullName: string; email: string; mobile: string; password: string }): Promise<{ success: boolean; user?: User; error?: string }> {
+  async registerLender(payload: { fullName: string; email: string; mobile: string; password: string }): Promise<{ success: boolean; user?: User; error?: string; verificationRequired?: boolean }> {
     return this.register({ full_name: payload.fullName.trim(), email: payload.email.trim().toLowerCase(), phone: payload.mobile.trim(), password: payload.password, role: 'lender' });
   }
 
-  async registerBorrower(payload: { authorizedName: string; email: string; mobile: string; password: string }): Promise<{ success: boolean; user?: User; error?: string }> {
+  async registerBorrower(payload: { authorizedName: string; email: string; mobile: string; password: string }): Promise<{ success: boolean; user?: User; error?: string; verificationRequired?: boolean }> {
     return this.register({ full_name: payload.authorizedName.trim(), email: payload.email.trim().toLowerCase(), phone: payload.mobile.trim(), password: payload.password, role: 'borrower' });
   }
 
-  private async register(payload: { full_name: string; email: string; phone: string; password: string; role: UserRole }): Promise<{ success: boolean; user?: User; error?: string }> {
+  private async register(payload: { full_name: string; email: string; phone: string; password: string; role: UserRole }): Promise<{ success: boolean; user?: User; error?: string; verificationRequired?: boolean }> {
     try {
-      const registration = await apiRequest<RegistrationResponse>('/auth/register', { method: 'POST', body: JSON.stringify(payload) });
-      if (registration.verification_required) {
-        const suffix = registration.verification_url ? ` Development verification link: ${registration.verification_url}` : '';
-        return { success: false, error: `Registration complete. Check ${payload.email} to verify your email before signing in.${suffix}` };
-      }
-      return { success: false, error: 'Registration complete. Verify your email before signing in.' };
+      const user = mapUser(await apiRequest<ApiUser>('/auth/register', { method: 'POST', body: JSON.stringify(payload) }));
+      return { success: true, user, verificationRequired: true };
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : 'Unable to register.' };
     }

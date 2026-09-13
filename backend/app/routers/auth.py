@@ -1,28 +1,28 @@
 import pyotp
-import smtplib
+import secrets
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from datetime import datetime, timezone
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.deps import get_current_user, get_current_token_payload
 from app.core.middleware import login_rate_limiter
 from app.core.security import (
-    hash_password, verify_password, create_access_token, validate_password_strength,
+    hash_password, verify_password, create_access_token, validate_password_strength, hash_verification_token,
 )
 from app.db.session import get_db
 from app.models.user import User
 from app.models.token import RevokedToken
 from app.models.consent import ConsentRecord
 from app.schemas.auth import (
-    UserRegister, Token, UserOut, MFASetupResponse, MFAVerifyRequest, UserLogin,
-    RegistrationResponse, EmailVerificationRequest, ResendVerificationRequest,
+    UserRegister, Token, UserOut, MFASetupResponse, MFAVerifyRequest, UserLogin, ResendVerificationRequest,
 )
 from app.services.audit import record_audit
 from app.services.data_retention import anonymize_user
-from app.services.email_verification import create_verification_token, send_verification_email, verify_email_token
+from app.models.email_verification import EmailVerificationToken
+from app.services.email import send_verification_email
 router = APIRouter(prefix="/auth", tags=["auth"])
-@router.post("/register", response_model=RegistrationResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 def register(payload: UserRegister, request: Request, db: Session = Depends(get_db)):
     problems = validate_password_strength(payload.password)
     if problems:
@@ -39,31 +39,35 @@ def register(payload: UserRegister, request: Request, db: Session = Depends(get_
         full_name=payload.full_name,
         phone=payload.phone,
         role=payload.role,
-        email_verified=False,
     )
     db.add(user)
     db.commit()
     db.refresh(user)
+    raw_token = secrets.token_urlsafe(32)
+    db.add(EmailVerificationToken(
+        user_id=user.id,
+        token_hash=hash_verification_token(raw_token),
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=settings.EMAIL_VERIFICATION_EXPIRE_MINUTES),
+    ))
     # Data-processing consent is required, not optional, for a regulated
     # platform handling financial/identity data — recorded at signup time.
     db.add(ConsentRecord(user_id=user.id, consent_type="data_processing", granted=True, version="1.0"))
     db.commit()
+    try:
+        send_verification_email(
+            user.email,
+            user.full_name,
+            f"{settings.FRONTEND_URL.rstrip('/')}/verify-email?token={raw_token}",
+        )
+    except Exception:
+        db.delete(user)
+        db.commit()
+        raise HTTPException(status_code=503, detail="Unable to send verification email. Please try again later.")
     record_audit(
         db, action="user.register", resource_type="user", resource_id=user.id, actor=user,
         detail={"role": user.role.value}, ip_address=request.client.host if request.client else None,
     )
-    token = create_verification_token(db, user)
-    try:
-        verification_link = send_verification_email(user, token)
-    except (OSError, smtplib.SMTPException) as exc:
-        db.delete(user)
-        db.commit()
-        raise HTTPException(status_code=503, detail="Unable to send verification email. Please try again later.") from exc
-    return RegistrationResponse(
-        user=user,
-        verification_required=True,
-        verification_url=verification_link,
-    )
+    return user
 @router.post("/login")
 def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     """
@@ -108,6 +112,49 @@ def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db
         db, action="user.login", resource_type="user", resource_id=user.id, actor=user, ip_address=client_ip,
     )
     return Token(access_token=token, role=user.role)
+
+
+@router.get("/verify-email")
+def verify_email(token: str, db: Session = Depends(get_db)):
+    record = db.query(EmailVerificationToken).filter(
+        EmailVerificationToken.token_hash == hash_verification_token(token),
+        EmailVerificationToken.used_at.is_(None),
+    ).first()
+    if not record or record.expires_at < datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="This verification link is invalid or expired.")
+    record.user.email_verified = True
+    record.used_at = datetime.now(timezone.utc)
+    db.commit()
+    return {"status": "verified", "message": "Email address verified. You can now sign in."}
+
+
+@router.post("/resend-verification")
+def resend_verification(payload: ResendVerificationRequest, request: Request, db: Session = Depends(get_db)):
+    client_ip = request.client.host if request.client else "unknown"
+    login_rate_limiter.check(f"resend-verification:{client_ip}:{payload.email.lower()}")
+    user = db.query(User).filter(User.email == payload.email.lower()).first()
+    if not user or user.email_verified:
+        return {"status": "sent"}
+    raw_token = secrets.token_urlsafe(32)
+    db.query(EmailVerificationToken).filter(
+        EmailVerificationToken.user_id == user.id,
+        EmailVerificationToken.used_at.is_(None),
+    ).update({"used_at": datetime.now(timezone.utc)})
+    db.add(EmailVerificationToken(
+        user_id=user.id,
+        token_hash=hash_verification_token(raw_token),
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=settings.EMAIL_VERIFICATION_EXPIRE_MINUTES),
+    ))
+    db.commit()
+    try:
+        send_verification_email(
+            user.email,
+            user.full_name,
+            f"{settings.FRONTEND_URL.rstrip('/')}/verify-email?token={raw_token}",
+        )
+    except Exception:
+        raise HTTPException(status_code=503, detail="Unable to send verification email.")
+    return {"status": "sent"}
 @router.post("/login/mfa", response_model=Token)
 def login_mfa(payload: UserLogin, request: Request, db: Session = Depends(get_db)):
     """Second step for MFA-enabled accounts: email + password + current TOTP code."""
@@ -123,6 +170,8 @@ def login_mfa(payload: UserLogin, request: Request, db: Session = Depends(get_db
         raise HTTPException(status_code=401, detail="Incorrect email or password")
     if not user.mfa_enabled or not user.mfa_secret:
         raise HTTPException(status_code=400, detail="MFA is not enabled on this account")
+    if not user.email_verified:
+        raise HTTPException(status_code=403, detail="Please verify your email address before signing in.")
     if not payload.mfa_code or not pyotp.TOTP(user.mfa_secret).verify(payload.mfa_code, valid_window=1):
         record_audit(
             db, action="user.login_mfa", resource_type="user", resource_id=user.id, actor=user,
@@ -192,26 +241,6 @@ def logout(
 @router.get("/me", response_model=UserOut)
 def me(current_user: User = Depends(get_current_user)):
     return current_user
-
-
-@router.post("/verify-email", response_model=UserOut)
-def verify_email(payload: EmailVerificationRequest, db: Session = Depends(get_db)):
-    try:
-        return verify_email_token(db, payload.token)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@router.post("/resend-verification", status_code=status.HTTP_202_ACCEPTED)
-def resend_verification(payload: ResendVerificationRequest, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == payload.email.lower()).first()
-    if user and not user.email_verified and user.is_active:
-        token = create_verification_token(db, user)
-        try:
-            send_verification_email(user, token)
-        except (OSError, smtplib.SMTPException) as exc:
-            raise HTTPException(status_code=503, detail="Unable to send verification email.") from exc
-    return {"status": "accepted"}
 @router.post("/erase-my-data", status_code=status.HTTP_200_OK)
 def erase_my_data(
     request: Request, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)

@@ -22,7 +22,6 @@ from app.models.message import Message, Notification
 from app.models.audit import AuditLog
 from app.models.consent import ConsentRecord
 from app.models.token import RevokedToken
-from app.models.email_verification import EmailVerificationToken
 from app.models.escrow import EscrowTransaction, EscrowStatus
 __all__ = [
     "User", "UserRole", "UserStatus",
@@ -40,5 +39,5 @@ __all__ = [
     "AuditLog",
     "ConsentRecord",
     "RevokedToken",
-    "EmailVerificationToken",
 ]
+from app.models.email_verification import EmailVerificationToken

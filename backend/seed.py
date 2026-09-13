@@ -22,18 +22,15 @@ db = SessionLocal()
 try:
     admin = User(
         email="admin@codevest.dev", hashed_password=hash_password("Admin1234!"),
-        full_name="Platform Admin", role=UserRole.ADMIN,
-        email_verified=True,
+        full_name="Platform Admin", role=UserRole.ADMIN, email_verified=True,
     )
     lender1 = User(
         email="lender1@codevest.dev", hashed_password=hash_password("Lender123!"),
-        full_name="Asha Rao", role=UserRole.LENDER,
-        email_verified=True,
+        full_name="Asha Rao", role=UserRole.LENDER, email_verified=True,
     )
     borrower1_user = User(
         email="borrower1@codevest.dev", hashed_password=hash_password("Borrower123!"),
-        full_name="Vikram Shah", role=UserRole.BORROWER,
-        email_verified=True,
+        full_name="Vikram Shah", role=UserRole.BORROWER, email_verified=True,
     )
     borrower2_user = User(
         email="borrower2@codevest.dev", hashed_password=hash_password("Borrower123!"),

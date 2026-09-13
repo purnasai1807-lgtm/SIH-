@@ -1,4 +1,5 @@
 import re
+import hashlib
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -42,3 +43,7 @@ def decode_access_token(token: str) -> Optional[dict[str, Any]]:
         return jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
     except JWTError:
         return None
+
+
+def hash_verification_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()

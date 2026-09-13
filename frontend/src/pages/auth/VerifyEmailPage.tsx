@@ -5,32 +5,23 @@ import { apiRequest } from '../../services/apiClient';
 export const VerifyEmailPage: React.FC = () => {
   const [params] = useSearchParams();
   const [message, setMessage] = useState('Verifying your email address...');
-  const [success, setSuccess] = useState(false);
-
   useEffect(() => {
     const token = params.get('token');
     if (!token) {
       setMessage('This verification link is missing its token.');
       return;
     }
-    apiRequest('/auth/verify-email', {
-      method: 'POST',
-      body: JSON.stringify({ token }),
-    })
-      .then(() => {
-        setSuccess(true);
-        setMessage('Your email has been verified. You can now sign in.');
-      })
+    apiRequest<{ message: string }>(`/auth/verify-email?token=${encodeURIComponent(token)}`)
+      .then((result) => setMessage(result.message))
       .catch((error) => setMessage(error instanceof Error ? error.message : 'This verification link is invalid or expired.'));
   }, [params]);
-
   return (
-    <div className="max-w-lg mx-auto px-6 py-20 text-center">
-      <h1 className="text-2xl font-extrabold text-slate-900">Email verification</h1>
-      <p className={`mt-4 text-sm ${success ? 'text-emerald-700' : 'text-slate-600'}`}>{message}</p>
-      <Link to="/" className="inline-block mt-8 text-sm font-semibold text-blue-600 hover:underline">
-        Return home
-      </Link>
+    <div className="min-h-[70vh] flex items-center justify-center px-4">
+      <div className="max-w-md rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+        <h1 className="text-xl font-bold text-slate-900">Email verification</h1>
+        <p className="mt-3 text-sm text-slate-600">{message}</p>
+        <Link to="/borrower/signin" className="mt-6 inline-block text-sm font-semibold text-blue-600">Continue to sign in</Link>
+      </div>
     </div>
   );
 };

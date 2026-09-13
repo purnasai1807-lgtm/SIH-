@@ -1,11 +1,7 @@
-"""Add email verification state and tokens.
-
-Revision ID: 20260309_add_email_verification
-"""
+"""Add email verification state and one-time tokens."""
 
 from alembic import op
 import sqlalchemy as sa
-
 
 revision = "20260309_add_email_verification"
 down_revision = None
@@ -14,12 +10,7 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "users",
-        sa.Column("email_verified", sa.Boolean(), nullable=False, server_default=sa.false()),
-    )
-    # Existing accounts predate verification and must retain access; newly
-    # registered accounts use the model default of False.
+    op.add_column("users", sa.Column("email_verified", sa.Boolean(), nullable=False, server_default=sa.false()))
     op.execute(sa.text("UPDATE users SET email_verified = TRUE"))
     op.create_table(
         "email_verification_tokens",
@@ -27,7 +18,7 @@ def upgrade() -> None:
         sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
         sa.Column("token_hash", sa.String(length=64), nullable=False),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("used_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("used_at", sa.DateTime(timezone=True)),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
     )
     op.create_index("ix_email_verification_tokens_user_id", "email_verification_tokens", ["user_id"])

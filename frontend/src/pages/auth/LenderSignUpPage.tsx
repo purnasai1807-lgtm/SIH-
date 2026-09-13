@@ -98,8 +98,8 @@ export const LenderSignUpPage: React.FC = () => {
       });
 
       if (res.success) {
-        // Automatically navigate immediately to lender dashboard
-        navigate('/lender/dashboard', { replace: true });
+        setFormError('Account created. Check your email and verify your address before signing in.');
+        setIsSubmitting(false);
       } else {
         setFormError(res.error || 'Failed to create account. Please try again.');
         setIsSubmitting(false);

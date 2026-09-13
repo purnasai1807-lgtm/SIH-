@@ -103,8 +103,8 @@ export const BorrowerSignUpPage: React.FC = () => {
       });
 
       if (res.success) {
-        // Immediately navigate to borrower dashboard
-        navigate('/borrower/dashboard', { replace: true });
+        setFormError('Account created. Check your email and verify your address before signing in.');
+        setIsSubmitting(false);
       } else {
         setFormError(res.error || 'Failed to create business account.');
         setIsSubmitting(false);

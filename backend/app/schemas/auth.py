@@ -13,6 +13,10 @@ class UserLogin(BaseModel):
     email: EmailStr
     password: str
     mfa_code: str | None = None  # required only if the account has MFA enabled
+
+
+class ResendVerificationRequest(BaseModel):
+    email: EmailStr
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
@@ -35,17 +39,3 @@ class UserOut(BaseModel):
     email_verified: bool
     class Config:
         from_attributes = True
-
-
-class RegistrationResponse(BaseModel):
-    user: UserOut
-    verification_required: bool = True
-    verification_url: str | None = None
-
-
-class EmailVerificationRequest(BaseModel):
-    token: str = Field(min_length=20)
-
-
-class ResendVerificationRequest(BaseModel):
-    email: EmailStr

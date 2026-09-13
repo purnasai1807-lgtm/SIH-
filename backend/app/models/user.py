@@ -26,8 +26,8 @@ class User(Base):
         Enum(UserStatus), nullable=False, default=UserStatus.ACTIVE
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    email_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_anonymized: Mapped[bool] = mapped_column(Boolean, default=False)
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # --- MFA (TOTP) ---
     mfa_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     mfa_secret: Mapped[str | None] = mapped_column(EncryptedString(64), nullable=True)
