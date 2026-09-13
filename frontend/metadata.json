@@ -1,0 +1,8 @@
+{
+  "name": "Remix CodeVest - AI Business Financing \u0026 Lender Intelligence",
+  "description": "AI-powered business financing intelligence platform connecting verified businesses with lenders with real-time risk intelligence and continuous monitoring. Built by CredForge.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
